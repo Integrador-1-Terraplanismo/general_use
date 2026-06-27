@@ -3,80 +3,218 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <ESP32Servo.h>
-#include <LittleFS.h>
 
-// --- Configurações Wi-Fi e Servidor TCP ---
+// =========================================================
+//            CONFIGURAÇÕES GERAIS E BANCO ESTÁTICO
+// =========================================================
+
 const char* ssid = "TERRAPLANISMO";
 const char* password = "terraplanismo_adm";
 WiFiServer server(3333);
+WiFiClient activeClient; 
 
-// --- Configurações NFC ---
 #define RST_PIN 22
 #define SS_PIN 5
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-// --- Configurações Servos ---
 const int servoPins[4] = {13, 12, 14, 27};
 Servo servos[4];
 
-// --- Estrutura da Máquina de Estados ---
-enum SystemState { STATE_IDLE, STATE_RECORD_GET_PLANET, STATE_RECORD_WAIT_NFC, STATE_READING_NFC };
+struct PlanetTag {
+    String planet;
+    String uid;
+};
+
+// Base de Dados Estática
+PlanetTag planetDB[] = {
+    {"MERCURIO", "FF0FBA317F0100"},
+    {"VENUS",    "FF0FD5327F0100"},
+    {"TERRA",    "FF0F48327F0100"}, 
+    {"MARTE",    "FF0F01327F0100"},
+    {"JUPITER",  "FF0F8E327F0100"},
+    {"SATURNO",  "FF0F4B327F0100"},
+    {"URANO",    "FF0F8F327F0100"},
+    {"NETUNO",   "FF0FD6327F0100"},
+    {"SOL",      "FF0FBD317F0100"},
+    {"LUA",      "FF0FD8327F0100"},
+    {"MARTE",    "FF0F04327F0100"}
+};
+const int dbSize = sizeof(planetDB) / sizeof(planetDB[0]);
+
+// =========================================================
+//                MÁQUINA DE ESTADOS E GAMIFICATION
+// =========================================================
+enum SystemState { STATE_IDLE, STATE_READING_NFC };
 SystemState currentState = STATE_IDLE;
 
 String requestedPlanet = "";
-String targetRecordPlanet = "";
-int failedAttempts = 0;
-bool testNfcServoMode = false;
 unsigned long readTimeoutStart = 0;
+const unsigned long TIMEOUT_MS = 15000; // 15 Segundos
 
-// --- Protótipos Essenciais ---
-void processCommand(String cmd, WiFiClient* client);
+int wrongAnswerCounter = 0; 
+
+// Controle de Animação Rápida dos Servos (Tempo apenas para completar o curso)
+unsigned long servoSuccessTimer = 0;
+bool servoSuccessActive = false;
+
+unsigned long servoErrorTimer = 0;
+bool servoErrorActive = false;
+
+const unsigned long TRANSIT_TIME_MS = 400; // Tempo físico para o braço girar antes de voltar
+
+// --- Protótipos ---
+void processTCPCommand(String cmd);
+void sendTCPMessage(String msg);
 void handleNFC();
 void handleSerialMonitor();
 void executeServoAction(int servoIndex, int angle);
 void tcpServerTask(void *pvParameters);
+void triggerThreeErrorsAnimation();
 
+// =========================================================
+//                        SETUP
+// =========================================================
 void setup() {
     Serial.begin(115200);
 
-    // 1. Inicializa Sistema de Arquivos Flash
-    if (!LittleFS.begin(true)) {
-        Serial.println("Erro ao montar partição LittleFS.");
-    }
+    ESP32PWM::allocateTimer(0);
+    ESP32PWM::allocateTimer(1);
+    ESP32PWM::allocateTimer(2);
+    ESP32PWM::allocateTimer(3);
 
-    // 2. Acopla e centraliza os Servos
+    Serial.println("[SERVO-LOG] Inicializando PWM de Hardware de forma permanente...");
     for (int i = 0; i < 4; i++) {
-        servos[i].setPeriodHertz(50);
-        servos[i].attach(servoPins[i], 500, 2500);
-        servos[i].write(90); 
+        servos[i].setPeriodHertz(50); 
+        servos[i].attach(servoPins[i], 500, 2400); 
+        servos[i].write(90); // Centraliza em 90°
     }
-    servos[2].write(0); 
-    servos[3].write(0);
 
-    // 3. Inicializa SPI e RC522
     SPI.begin();
     mfrc522.PCD_Init();
 
-    // 4. Inicia AP Mode
     WiFi.softAP(ssid, password);
     server.begin();
-    Serial.println("Wi-Fi AP Iniciado | Servidor TCP escutando na porta 3333");
-
-    // 5. Destaca o servidor TCP em uma Task exclusiva de rede
+    Serial.println("\n[SISTEMA] Sistema Pronto | Espera de 5s Removida.");
+    
     xTaskCreate(tcpServerTask, "TCP_Task", 4096, NULL, 1, NULL);
 }
 
+// =========================================================
+//                        LOOP
+// =========================================================
 void loop() {
-    handleSerialMonitor(); // Escuta teclado/terminal
-    handleNFC();           // Escuta aproximação de tags
+    handleSerialMonitor();
+    handleNFC();
     
-    // Processamento do Timeout de Busca NFC (30 segundos)
-    if (currentState == STATE_READING_NFC && (millis() - readTimeoutStart > 30000)) {
-        Serial.println("[TIMEOUT] Busca NFC expirou.");
+    // Timeout de 15s na busca NFC
+    if (currentState == STATE_READING_NFC && (millis() - readTimeoutStart > TIMEOUT_MS)) {
+        Serial.println("\n[TIMEOUT-LOG] 15 segundos esgotados sem leitura de tag.");
+        sendTCPMessage("answer_timeout"); 
+        
+        wrongAnswerCounter++;
         currentState = STATE_IDLE;
-        failedAttempts = 0;
+
+        if (wrongAnswerCounter >= 3) {
+            triggerThreeErrorsAnimation();
+        }
     }
-    delay(50); // Delay suave para ceder tempo à task idle do processador
+
+    // --- RETORNO AUTOMÁTICO IMEDIATO DOS SERVOS ---
+    
+    // Retorno dos Servos 3 e 4 logo após atingirem 0°
+    if (servoSuccessActive && (millis() - servoSuccessTimer >= TRANSIT_TIME_MS)) {
+        Serial.println("[SERVO-LOG] Curso concluido: Retornando servos 3 e 4 para 90°");
+        servos[2].write(90);
+        servos[3].write(90);
+        servoSuccessActive = false;
+    }
+
+    // Retorno de todos os servos logo após atingirem 180° (3 Erros)
+    if (servoErrorActive && (millis() - servoErrorTimer >= TRANSIT_TIME_MS)) {
+        Serial.println("[SERVO-LOG] Curso concluido: Retornando todos os servos para 90°");
+        for (int i = 0; i < 4; i++) servos[i].write(90);
+        servoErrorActive = false;
+    }
+    
+    delay(15); 
+}
+
+// =========================================================
+//                  LÓGICA MECÂNICA
+// =========================================================
+
+void triggerThreeErrorsAnimation() {
+    Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
+    
+    for (int i = 0; i < 4; i++) {
+        servos[i].write(180);
+    }
+    
+    servoErrorTimer = millis();
+    servoErrorActive = true;
+    servoSuccessActive = false; 
+    wrongAnswerCounter = 0;
+}
+
+void executeServoAction(int servoIndex, int angle) {
+    servos[servoIndex].write(angle);
+}
+
+// =========================================================
+//                     LEITURA NFC
+// =========================================================
+void handleNFC() {
+    if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) return;
+
+    String uidStr = "";
+    for (byte i = 0; i < mfrc522.uid.size; i++) {
+        if (mfrc522.uid.uidByte[i] < 0x10) uidStr += "0";
+        uidStr += String(mfrc522.uid.uidByte[i], HEX);
+    }
+    uidStr.toUpperCase();
+    
+    mfrc522.PICC_HaltA(); 
+    mfrc522.PCD_StopCrypto1();
+
+    if (currentState == STATE_READING_NFC) {
+        String detectedPlanet = "";
+        bool found = false;
+        
+        for (int i = 0; i < dbSize; i++) {
+            if (planetDB[i].uid == uidStr) {
+                detectedPlanet = planetDB[i].planet;
+                found = true;
+                break;
+            }
+        }
+
+        // --- CASO 1: LEITURA CORRETA ---
+        if (found && detectedPlanet == requestedPlanet) {
+            Serial.println("\n[NFC-LOG] Sucesso! Tag " + uidStr + " validada para o planeta " + detectedPlanet);
+            sendTCPMessage("answer_correct");
+            currentState = STATE_IDLE; // Desbloqueia instantaneamente para receber a próxima fase
+            wrongAnswerCounter = 0;    
+
+            Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para 0°");
+            servos[2].write(0);
+            servos[3].write(0);
+            
+            servoSuccessTimer = millis();
+            servoSuccessActive = true;
+            servoErrorActive = false; 
+        } 
+        // --- CASO 2: LEITURA INCORRETA ---
+        else {
+            Serial.println("\n[NFC-LOG] Erro! Tag detectada (" + uidStr + ") nao condiz.");
+            sendTCPMessage("answer_incorrect");
+            currentState = STATE_IDLE; 
+
+            wrongAnswerCounter++;
+            if (wrongAnswerCounter >= 3) {
+                triggerThreeErrorsAnimation();
+            }
+        }
+    }
 }
 
 // =========================================================
@@ -84,70 +222,68 @@ void loop() {
 // =========================================================
 void tcpServerTask(void *pvParameters) {
     while (true) {
-        WiFiClient client = server.available();
-        if (client) {
-            client.setNoDelay(true); // Reduz latência TCP
-            while (client.connected()) {
-                if (client.available()) {
-                    String req = client.readStringUntil('\n');
+        WiFiClient newClient = server.available();
+        if (newClient) {
+            Serial.println("\n[TCP-LOG] Cliente conectado! IP: " + newClient.remoteIP().toString());
+            if (activeClient && activeClient.connected()) activeClient.stop();
+            activeClient = newClient;
+            activeClient.setNoDelay(true);
+
+            while (activeClient.connected()) {
+                if (activeClient.available()) {
+                    String req = activeClient.readStringUntil('\n');
                     req.trim();
-                    if (req.length() > 0) processCommand(req, &client);
+                    if (req.length() > 0) {
+                        processTCPCommand(req);
+                    }
                 }
-                vTaskDelay(10 / portTICK_PERIOD_MS);
+                vTaskDelay(5 / portTICK_PERIOD_MS);
             }
-            client.stop();
+            Serial.println("[TCP-LOG] Cliente desconectado.");
+            activeClient.stop();
         }
-        vTaskDelay(50 / portTICK_PERIOD_MS);
+        vTaskDelay(15 / portTICK_PERIOD_MS);
     }
 }
 
-// =========================================================
-//               ROTEAMENTO DE COMANDOS STRING
-// =========================================================
-void processCommand(String cmd, WiFiClient* client) {
-    cmd.toUpperCase();
-    String resp = "";
-
-    if (cmd.startsWith("BUSCA:")) {
-        if (currentState != STATE_IDLE) { 
-            resp = "ERRO:ESP32 Ocupado\n"; 
-        } else {
-            requestedPlanet = cmd.substring(6);
-            currentState = STATE_READING_NFC;
-            readTimeoutStart = millis();
-            failedAttempts = 0;
-            resp = "BUSCANDO:" + requestedPlanet + "\n";
-        }
-    } else if (cmd == "STATUS") {
-        resp = "STATUS:estado=" + String(currentState) + ",modo_combinado=" + (testNfcServoMode ? "ON" : "OFF") + "\n";
-    } else if (cmd == "LISTAR") {
-        File f = LittleFS.open("/planetas.txt", "r");
-        if (f) { resp = "LISTAR:\n" + f.readString(); f.close(); }
-    } else if (cmd == "LIMPAR") {
-        LittleFS.remove("/planetas.txt");
-        resp = "Base de dados limpa.\n";
-    } else if (cmd.startsWith("TESTE_SERVO")) {
-        int idx = cmd.substring(11).toInt() - 1; // Extrai número e ajusta para índice (0-3)
-        if (idx >= 0 && idx < 4) {
-            executeServoAction(idx, 0); delay(1000); 
-            executeServoAction(idx, 180); delay(1000); 
-            executeServoAction(idx, 90);
-            resp = cmd + "_CONCLUIDO\n";
-        }
-    } else if (cmd == "OPEN") {
-        servos[2].write(0); servos[3].write(180); delay(3000);
-        servos[2].write(90); servos[3].write(90);
-        resp = "TESTE_PAR_OPEN_CONCLUIDO\n";
-    } else if (cmd == "TIRA") {
-        servos[2].write(180); servos[3].write(0); delay(3000);
-        servos[2].write(90); servos[3].write(90);
-        resp = "TESTE_PAR_TIRA_CONCLUIDO\n";
-    } else { 
-        resp = "COMANDO_INVALIDO\n"; 
+void sendTCPMessage(String msg) {
+    if (activeClient && activeClient.connected()) {
+        activeClient.println(msg);
+        Serial.println("[TCP-LOG] Mensagem Enviada -> " + msg);
+        delay(2000);
     }
+}
 
-    if (client) client->print(resp); // Retorna via Socket
-    Serial.print(resp);              // Espelha no monitor
+void main_force_servos_home() {
+    // Interrompe animações antigas e força retorno a 90° imediatamente se uma nova fase entrar
+    if (servoSuccessActive || servoErrorActive) {
+        delay(100); // Pequena pausa para garantir que o movimento anterior seja interrompido
+        Serial.println("[SERVO-LOG] Nova fase recebida! Forçando interrupcao de movimento e reset para 90°");
+        for (int i = 0; i < 4; i++) servos[i].write(90);
+        servoSuccessActive = false;
+        servoErrorActive = false;
+    }
+}
+
+void processTCPCommand(String cmd) {
+    String lowerCmd = cmd;
+    lowerCmd.toLowerCase();
+
+    if (lowerCmd.startsWith("busca:") || lowerCmd.startsWith("planet_selected")) {
+        int separatorIdx = cmd.indexOf(':');
+        if (separatorIdx == -1) separatorIdx = cmd.indexOf(' '); 
+        
+        if (separatorIdx != -1) {
+            requestedPlanet = cmd.substring(separatorIdx + 1);
+            requestedPlanet.trim();
+            requestedPlanet.toUpperCase();
+        }
+        
+        main_force_servos_home(); // Garante o alinhamento total de forma imediata
+        currentState = STATE_READING_NFC;
+        readTimeoutStart = millis(); 
+        Serial.println("[SISTEMA] Nova Fase ativa. Aguardando tag para: " + requestedPlanet);
+    } 
 }
 
 // =========================================================
@@ -159,86 +295,16 @@ void handleSerialMonitor() {
         input.trim();
         input.toUpperCase();
 
-        if (input == "GRAVAR") {
-            currentState = STATE_RECORD_GET_PLANET;
-            Serial.println("\n[MODO GRAVACAO] Introduza o nome do planeta: ");
-        } else if (input == "END") {
-            currentState = STATE_IDLE;
-            testNfcServoMode = false;
-            Serial.println("\nModo normal restaurado.");
-        } else if (currentState == STATE_RECORD_GET_PLANET) {
-            targetRecordPlanet = input;
-            currentState = STATE_RECORD_WAIT_NFC;
-            Serial.println("\nPlaneta: " + targetRecordPlanet + "\nAproxime a tag NFC...");
-        } else {
-            processCommand(input, NULL);
-        }
-    }
-}
-
-// =========================================================
-//                     LEITURA NFC
-// =========================================================
-void handleNFC() {
-    if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) return;
-
-    // Converte Bytes do UID em String Hexadecimal
-    String uidStr = "";
-    for (byte i = 0; i < mfrc522.uid.size; i++) {
-        if (mfrc522.uid.uidByte[i] < 0x10) uidStr += "0";
-        uidStr += String(mfrc522.uid.uidByte[i], HEX);
-    }
-    uidStr.toUpperCase();
-    mfrc522.PICC_HaltA(); // Trava leitura sequencial desenfreada da mesma tag
-
-    if (testNfcServoMode) {
-        Serial.println("\n[TESTE NFC+SERVO] Tag detectada: " + uidStr);
-        executeServoAction(0, 0); delay(1000); executeServoAction(0, 90);
-        return;
-    }
-
-    // Rotina de Gravação de Cartão Novo
-    if (currentState == STATE_RECORD_WAIT_NFC) {
-        File f = LittleFS.open("/planetas.txt", "a");
-        if (f) {
-            f.println(targetRecordPlanet + "," + uidStr);
-            f.close();
-            Serial.println("\n[GRAVADO] Tag " + uidStr + " -> " + targetRecordPlanet);
-            Serial.println("Envie 'END' para sair ou cadastre outro planeta.");
-        }
-    } 
-    // Rotina de Validação de Cartão 
-    else if (currentState == STATE_READING_NFC) {
-        File f = LittleFS.open("/planetas.txt", "r");
-        bool found = false;
-        String detectedPlanet = "";
-        
-        while (f && f.available()) {
-            String line = f.readStringUntil('\n');
-            int commaIdx = line.indexOf(',');
-            if (commaIdx > 0 && line.substring(commaIdx + 1).indexOf(uidStr) != -1) {
-                detectedPlanet = line.substring(0, commaIdx);
-                detectedPlanet.toUpperCase();
-                found = true; 
-                break;
-            }
-        }
-        if (f) f.close();
-
-        if (found && detectedPlanet == requestedPlanet) {
-            Serial.println("\n[NFC OK] Tag " + uidStr + " confirmada para " + detectedPlanet);
-            currentState = STATE_IDLE; // Destrava sistema
-        } else {
-            failedAttempts++;
-            if (failedAttempts >= 3) {
-                Serial.println("\n[BLOQUEIO] 3 tentativas falhas. Abortando...");
-                currentState = STATE_IDLE;
+        if (input.startsWith("TESTE_SERVO")) {
+            int idx = -1;
+            if (input.indexOf(' ') != -1) idx = input.substring(input.indexOf(' ') + 1).toInt() - 1;
+            if (idx >= 0 && idx < 4) {
+                Serial.printf("\n[TESTE] Movendo Servo %d...\n", idx + 1);
+                servos[idx].write(0); delay(600);
+                servos[idx].write(180); delay(600);
+                servos[idx].write(90);
+                Serial.println("[TESTE] Concluido.");
             }
         }
     }
-}
-
-// Wrapper para enxugar a sintaxe de atuação dos Servos
-void executeServoAction(int servoIndex, int angle) {
-    servos[servoIndex].write(angle);
 }
