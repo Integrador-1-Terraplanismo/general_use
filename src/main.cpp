@@ -149,16 +149,16 @@ void triggerThreeErrorsAnimation() {
     if(cont_fases >= 3){
     Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
     //codigo pra abrir a porta
-
-    /*for (int i = 0; i < 4; i++) {
-        servos[i].write(180);delay(600);
-    }
-    */
+    servos[0].write(0);
+    delay(3500);
+    servos[0].write(0);
+    delay(600);
     
     servoErrorTimer = millis();
     servoErrorActive = true;
     servoSuccessActive = false; 
-    wrongAnswerCounter = 0;}
+    wrongAnswerCounter = 0;
+    }
 }
 
 void executeServoAction(int servoIndex, int angle) {
@@ -318,6 +318,43 @@ void handleSerialMonitor() {
                 servos[idx].write(90);
                 Serial.println("[TESTE] Concluido.");
             }
+        }
+        if(input.startsWith("TESTE_PARES")) {
+            servos[2].write(0);
+            servos[3].write(180);
+            delay(600);
+            servos[2].write(90);
+            servos[3].write(90);
+            delay(1000);
+            servos[1].write(180);
+            servos[0].write(0);
+            delay(600);
+            servos[1].write(90);
+            servos[0].write(90);
+            delay(600);
+        }
+        if(input == "RESET") {
+            Serial.println("\n[RESET] Resetando sistema e servos para 90°...");
+            for (int i = 0; i < 4; i++) servos[i].write(90);
+            currentState = STATE_IDLE;
+            wrongAnswerCounter = 0;
+            servoSuccessActive = false;
+            servoErrorActive = false;
+            Serial.println("[RESET] Concluido.");
+        }
+        if(input == "TESTE_NFC"){
+            if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) return;
+
+            String uidStr = "";
+            for (byte i = 0; i < mfrc522.uid.size; i++) {
+                if (mfrc522.uid.uidByte[i] < 0x10) uidStr += "0";
+                uidStr += String(mfrc522.uid.uidByte[i], HEX);
+            }
+            uidStr.toUpperCase();
+            
+            mfrc522.PICC_HaltA(); 
+            mfrc522.PCD_StopCrypto1();
+            Serial.println("[TESTE_NFC] Leitura concluída. UID: " + uidStr);
         }
     }
 }
