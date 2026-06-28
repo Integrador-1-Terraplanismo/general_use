@@ -20,6 +20,8 @@ MFRC522 mfrc522(SS_PIN, RST_PIN);
 const int servoPins[4] = {13, 12, 14, 27};
 Servo servos[4];
 
+int cont_fases = 0;
+
 struct PlanetTag {
     String planet;
     String uid;
@@ -49,7 +51,7 @@ SystemState currentState = STATE_IDLE;
 
 String requestedPlanet = "";
 unsigned long readTimeoutStart = 0;
-const unsigned long TIMEOUT_MS = 15000; // 15 Segundos
+const unsigned long TIMEOUT_MS = 180000; // 15 Segundos
 
 int wrongAnswerCounter = 0; 
 
@@ -112,7 +114,6 @@ void loop() {
         sendTCPMessage("answer_timeout"); 
         
         wrongAnswerCounter++;
-        currentState = STATE_IDLE;
 
         if (wrongAnswerCounter >= 3) {
             triggerThreeErrorsAnimation();
@@ -145,6 +146,7 @@ void loop() {
 // =========================================================
 
 void triggerThreeErrorsAnimation() {
+    if(cont_fases < 3){
     Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
     
     for (int i = 0; i < 4; i++) {
@@ -154,7 +156,7 @@ void triggerThreeErrorsAnimation() {
     servoErrorTimer = millis();
     servoErrorActive = true;
     servoSuccessActive = false; 
-    wrongAnswerCounter = 0;
+    wrongAnswerCounter = 0;}
 }
 
 void executeServoAction(int servoIndex, int angle) {
@@ -190,19 +192,20 @@ void handleNFC() {
         }
 
         // --- CASO 1: LEITURA CORRETA ---
-        if (found && detectedPlanet == requestedPlanet) {
+        if ((found && detectedPlanet == requestedPlanet)) {
             Serial.println("\n[NFC-LOG] Sucesso! Tag " + uidStr + " validada para o planeta " + detectedPlanet);
             sendTCPMessage("answer_correct");
             currentState = STATE_IDLE; // Desbloqueia instantaneamente para receber a próxima fase
             wrongAnswerCounter = 0;    
 
+            if(cont_fases < 3){
             Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para 0°");
             servos[2].write(0);
             servos[3].write(0);
             
             servoSuccessTimer = millis();
             servoSuccessActive = true;
-            servoErrorActive = false; 
+            servoErrorActive = false; }
         } 
         // --- CASO 2: LEITURA INCORRETA ---
         else {
@@ -271,6 +274,7 @@ void processTCPCommand(String cmd) {
     lowerCmd.toLowerCase();
 
     if (lowerCmd.startsWith("busca:") || lowerCmd.startsWith("planet_selected")) {
+        cont_fases++;
         int separatorIdx = cmd.indexOf(':');
         if (separatorIdx == -1) separatorIdx = cmd.indexOf(' '); 
         
