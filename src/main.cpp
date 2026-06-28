@@ -152,6 +152,7 @@ void triggerThreeErrorsAnimation() {
     servos[2].write(180);
     servos[3].write(0);
     delay(600);
+    //codigo pra abrir a porta
 
     /*for (int i = 0; i < 4; i++) {
         servos[i].write(180);delay(600);
@@ -203,11 +204,11 @@ void handleNFC() {
             currentState = STATE_IDLE; // Desbloqueia instantaneamente para receber a próxima fase
             wrongAnswerCounter = 0;    
 
-            if(cont_fases > 3){
+            if(cont_fases >= 3){
             Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para 0°");
             servos[2].write(0);
             servos[3].write(180);
-            
+            delay(600);
             servoSuccessTimer = millis();
             servoSuccessActive = true;
             servoErrorActive = false; }
@@ -216,7 +217,12 @@ void handleNFC() {
         else {
             Serial.println("\n[NFC-LOG] Erro! Tag detectada (" + uidStr + ") nao condiz.");
             sendTCPMessage("answer_incorrect");
-            
+            servos[2].write(180);
+            servos[3].write(0);
+            delay(500);
+            servos[2].write(90);
+            servos[3].write(90);
+            delay(100);
             wrongAnswerCounter++;
             if (wrongAnswerCounter >= 3) {
                 triggerThreeErrorsAnimation();
