@@ -213,13 +213,15 @@ void handleNFC() {
         else {
             Serial.println("\n[NFC-LOG] Erro! Tag detectada (" + uidStr + ") nao condiz.");
             sendTCPMessage("answer_incorrect");
-            servos[2].write(180);
-            servos[3].write(0);
-            delay(500);
-            servos[2].write(90);
-            servos[3].write(90);
-            delay(100);
-            wrongAnswerCounter++;
+            if(cont_fases >= 3){
+                servos[2].write(180);
+                servos[3].write(0);
+                delay(500);
+                servos[2].write(90);
+                servos[3].write(90);
+                delay(100);
+                wrongAnswerCounter++;
+            }
             if (wrongAnswerCounter >= 3) {
                 triggerThreeErrorsAnimation();
                 currentState = STATE_IDLE; 
