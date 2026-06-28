@@ -148,10 +148,6 @@ void loop() {
 void triggerThreeErrorsAnimation() {
     if(cont_fases >= 3){
     Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
-    
-    servos[2].write(180);
-    servos[3].write(0);
-    delay(600);
     //codigo pra abrir a porta
 
     /*for (int i = 0; i < 4; i++) {
