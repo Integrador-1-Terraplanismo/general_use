@@ -125,7 +125,7 @@ void loop() {
     if (servoSuccessActive && (millis() - servoSuccessTimer >= TRANSIT_TIME_MS)) {
         Serial.println("[SERVO-LOG] Curso concluido: Retornando servos 3 e 4 para 90°");
         servos[2].write(90);
-        servos[3].write(90);
+        servos[3].write(90);delay(600);
         servoSuccessActive = false;
     }
 
@@ -133,6 +133,7 @@ void loop() {
     if (servoErrorActive && (millis() - servoErrorTimer >= TRANSIT_TIME_MS)) {
         Serial.println("[SERVO-LOG] Curso concluido: Retornando todos os servos para 90°");
         for (int i = 0; i < 4; i++) servos[i].write(90);
+        delay(600);
         servoErrorActive = false;
     }
     
@@ -147,7 +148,7 @@ void triggerThreeErrorsAnimation() {
     Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
     
     for (int i = 0; i < 4; i++) {
-        servos[i].write(180);
+        servos[i].write(180);delay(600);
     }
     
     servoErrorTimer = millis();
@@ -157,7 +158,7 @@ void triggerThreeErrorsAnimation() {
 }
 
 void executeServoAction(int servoIndex, int angle) {
-    servos[servoIndex].write(angle);
+    servos[servoIndex].write(angle);delay(600);
 }
 
 // =========================================================
