@@ -15,6 +15,8 @@ WiFiClient activeClient;
 
 #define RST_PIN 22
 #define SS_PIN 5
+#define buttons_PIN 32
+
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
 const int servoPins[4] = {13, 12, 14, 27};
@@ -72,6 +74,7 @@ void handleSerialMonitor();
 void executeServoAction(int servoIndex, int angle);
 void tcpServerTask(void *pvParameters);
 void triggerThreeErrorsAnimation();
+void button_module(void *pvParameters);
 
 // =========================================================
 //                        SETUP
@@ -99,6 +102,7 @@ void setup() {
     Serial.println("\n[SISTEMA] Sistema Pronto | Espera de 5s Removida.");
     
     xTaskCreate(tcpServerTask, "TCP_Task", 4096, NULL, 1, NULL);
+    xTaskCreate (button_module, "Button_Task", 2048, NULL, 1, NULL);
 }
 
 // =========================================================
@@ -106,8 +110,8 @@ void setup() {
 // =========================================================
 void loop() {
     handleSerialMonitor();
-    handleNFC();
-    
+    handleNFC(); 
+
     // Timeout de 15s na busca NFC
     if (currentState == STATE_READING_NFC && (millis() - readTimeoutStart > TIMEOUT_MS)) {
         Serial.println("\n[TIMEOUT-LOG] 15 segundos esgotados sem leitura de tag.");
@@ -137,8 +141,8 @@ void loop() {
         delay(600);
         servoErrorActive = false;
     }
-    
-    delay(15); 
+
+    delay(15);
 }
 
 // =========================================================
@@ -358,5 +362,42 @@ void handleSerialMonitor() {
             mfrc522.PCD_StopCrypto1();
             Serial.println("[TESTE_NFC] Leitura concluída. UID: " + uidStr);
         }
+    }
+}
+
+// =========================================================
+//            Task Leitura do Módulo de Botões
+// =========================================================
+
+void button_module(void *pvParameters) {
+    pinMode(buttons_PIN, INPUT_PULLUP);
+    int key_read;
+    String Key_id, Key_id_prev = "";
+    while (true) {
+        key_read = analogRead(buttons_PIN);
+        if(key_read < 4090) {
+            Serial.println(key_read);
+        }
+        if (key_read == 0) {
+            Key_id = "LEFT";
+        } else if (key_read > 10 && key_read < 500) {
+            Key_id = "UP";
+        } else if (key_read > 600 && key_read < 1100) {
+            Key_id = "DOWN";
+        } else if (key_read > 1600 && key_read < 1800) {
+            Key_id = "RIGHT";
+        } else if (key_read > 2800 && key_read < 3100) {
+            Key_id = "OK";
+        } else {
+            Key_id = "";
+        }
+        if (Key_id.length() > 0) {
+            Serial.println(Key_id);
+        }
+        if (Key_id != Key_id_prev) {
+            delay(200);
+        }
+
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
