@@ -234,6 +234,7 @@ void handleNFC() {
 //                   TAREFA DE REDE (TCP)
 // =========================================================
 void tcpServerTask(void *pvParameters) {
+    Serial.println("[TCP-LOG] Tarefa TCP iniciada. Aguardando conexões...");
     while (true) {
         WiFiClient newClient = server.available();
         if (newClient) {
