@@ -55,8 +55,6 @@ String requestedPlanet = "";
 unsigned long readTimeoutStart = 0;
 const unsigned long TIMEOUT_MS = 180000; // 15 Segundos
 
-int wrongAnswerCounter = 0; 
-
 // Controle de Animação Rápida dos Servos (Tempo apenas para completar o curso)
 unsigned long servoSuccessTimer = 0;
 bool servoSuccessActive = false;
@@ -118,11 +116,6 @@ void loop() {
         Serial.println("\n[TIMEOUT-LOG] 15 segundos esgotados sem leitura de tag.");
         sendTCPMessage("answer_timeout"); 
         
-        wrongAnswerCounter++;
-
-        if (wrongAnswerCounter >= 3) {
-            triggerThreeErrorsAnimation();
-        }
     }
 
     // --- RETORNO AUTOMÁTICO IMEDIATO DOS SERVOS ---
@@ -162,7 +155,7 @@ void triggerThreeErrorsAnimation() {
         servoErrorTimer = millis();
         servoErrorActive = true;
         servoSuccessActive = false; 
-        wrongAnswerCounter = 0;
+        
     }
 }
 
@@ -186,7 +179,7 @@ void handleNFC() {
     mfrc522.PICC_HaltA(); 
     mfrc522.PCD_StopCrypto1();
 
-    if (currentState == STATE_READING_NFC) {
+    if (currentState == STATE_READING_NFC || currentState == STATE_TUTORIAL) {
         String detectedPlanet = "";
         bool found = false;
         
@@ -203,7 +196,7 @@ void handleNFC() {
             Serial.println("\n[NFC-LOG] Sucesso! Tag " + uidStr + " validada para o planeta " + detectedPlanet);
             sendTCPMessage("answer_correct");
             currentState = STATE_IDLE; // Desbloqueia instantaneamente para receber a próxima fase
-            wrongAnswerCounter = 0;    
+              
 
             if (!STATE_TUTORIAL) {
                 Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para 0°");
@@ -226,11 +219,7 @@ void handleNFC() {
                 servos[2].write(90);
                 servos[3].write(90);
                 delay(100);
-                wrongAnswerCounter++;
-            }
-            if (wrongAnswerCounter >= 3) {
-                triggerThreeErrorsAnimation();
-                currentState = STATE_IDLE; 
+                
             }
         }
     }
@@ -322,6 +311,13 @@ void processTCPCommand(String cmd) {
         readTimeoutStart = millis(); 
         Serial.println("[SISTEMA] Nova Fase ativa. Aguardando tag para: " + requestedPlanet);
     }
+
+    else if(lowerCmd.startsWith("game_over") || lowerCmd == "game_over") {
+        Serial.println("[SISTEMA] Game Over recebido. Resetando sistema...");
+        currentState = STATE_IDLE;
+        triggerThreeErrorsAnimation(); // Animação de erro final
+    }
+
     // --- Ativa o estado de leitura de botões ---
     else if (lowerCmd.startsWith("botoes:on") || lowerCmd == "buttons_on") {
         currentState = STATE_READING_BUTTONS;
@@ -382,7 +378,7 @@ void handleSerialMonitor() {
             Serial.println("\n[RESET] Resetando sistema e servos para 90°...");
             for (int i = 0; i < 4; i++) servos[i].write(90);
             currentState = STATE_IDLE;
-            wrongAnswerCounter = 0;
+            
             servoSuccessActive = false;
             servoErrorActive = false;
             Serial.println("[RESET] Concluido.");
