@@ -22,7 +22,7 @@ MFRC522 mfrc522(SS_PIN, RST_PIN);
 const int servoPins[4] = {13, 12, 14, 27};
 Servo servos[4];
 
-int cont_fases = 0;
+//int cont_fases = 0;
 
 struct PlanetTag {
     String planet;
@@ -48,7 +48,7 @@ const int dbSize = sizeof(planetDB) / sizeof(planetDB[0]);
 // =========================================================
 //                MÁQUINA DE ESTADOS E GAMIFICATION
 // =========================================================
-enum SystemState { STATE_IDLE, STATE_READING_NFC, STATE_READING_BUTTONS };
+enum SystemState { STATE_IDLE, STATE_READING_NFC, STATE_READING_BUTTONS, STATE_TUTORIAL };
 SystemState currentState = STATE_IDLE;
 
 String requestedPlanet = "";
@@ -151,7 +151,7 @@ void loop() {
 // =========================================================
 
 void triggerThreeErrorsAnimation() {
-    if (cont_fases >= 3) {
+    if (!STATE_TUTORIAL) {
         Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
         //codigo pra abrir a porta
         servos[0].write(0);
@@ -205,7 +205,7 @@ void handleNFC() {
             currentState = STATE_IDLE; // Desbloqueia instantaneamente para receber a próxima fase
             wrongAnswerCounter = 0;    
 
-            if (cont_fases >= 3) {
+            if (!STATE_TUTORIAL) {
                 Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para 0°");
                 servos[2].write(0);
                 servos[3].write(180);
@@ -219,7 +219,7 @@ void handleNFC() {
         else {
             Serial.println("\n[NFC-LOG] Erro! Tag detectada (" + uidStr + ") nao condiz.");
             sendTCPMessage("answer_incorrect");
-            if (cont_fases >= 3) {
+            if (!STATE_TUTORIAL) {
                 servos[2].write(180);
                 servos[3].write(0);
                 delay(500);
@@ -244,7 +244,7 @@ void tcpServerTask(void *pvParameters) {
     while (true) {
         WiFiClient newClient = server.available();
         if (newClient) {
-            cont_fases = 0;
+            // cont_fases = 0;
             Serial.println("\n[TCP-LOG] Cliente conectado! IP: " + newClient.remoteIP().toString());
             if (activeClient && activeClient.connected()) activeClient.stop();
             activeClient = newClient;
@@ -264,7 +264,7 @@ void tcpServerTask(void *pvParameters) {
             activeClient.stop();
 
             // Cliente caiu/desconectou: encerra qualquer leitura de botões em andamento
-            if (currentState == STATE_READING_BUTTONS) {
+            if (currentState != STATE_IDLE) {
                 currentState = STATE_IDLE;
                 Serial.println("[BOTOES-LOG] Estado de leitura de botões encerrado (cliente desconectou).");
             }
@@ -307,7 +307,7 @@ void processTCPCommand(String cmd) {
     lowerCmd.toLowerCase();
 
     if (lowerCmd.startsWith("busca:") || lowerCmd.startsWith("planet_selected")) {
-        cont_fases++;
+        // cont_fases++;
         int separatorIdx = cmd.indexOf(':');
         if (separatorIdx == -1) separatorIdx = cmd.indexOf(' '); 
         
@@ -333,6 +333,14 @@ void processTCPCommand(String cmd) {
             currentState = STATE_IDLE;
         }
         Serial.println("[BOTOES-LOG] Estado de leitura de botões DESATIVADO.");
+    }
+    else if (lowerCmd.startsWith("tutorial:on") || lowerCmd == "tutorial_on") {
+        currentState = STATE_TUTORIAL;
+        Serial.println("[TUTORIAL-LOG] Modo Tutorial ATIVADO.");
+    }
+    else if (lowerCmd.startsWith("tutorial:off") || lowerCmd == "tutorial_off") {
+        currentState = STATE_IDLE;
+        Serial.println("[TUTORIAL-LOG] Modo Tutorial DESATIVADO.");
     }
 }
 
