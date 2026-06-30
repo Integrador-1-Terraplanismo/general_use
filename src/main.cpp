@@ -375,16 +375,13 @@ void button_module(void *pvParameters) {
     String Key_id, Key_id_prev = "";
     while (true) {
         key_read = analogRead(buttons_PIN);
-        if(key_read < 4090) {
-            Serial.println(key_read);
-        }
         if (key_read == 0) {
             Key_id = "LEFT";
         } else if (key_read > 10 && key_read < 500) {
             Key_id = "UP";
         } else if (key_read > 600 && key_read < 1100) {
             Key_id = "DOWN";
-        } else if (key_read > 1600 && key_read < 1800) {
+        } else if (key_read > 1600 && key_read < 1900) {
             Key_id = "RIGHT";
         } else if (key_read > 2800 && key_read < 3100) {
             Key_id = "OK";
@@ -392,12 +389,12 @@ void button_module(void *pvParameters) {
             Key_id = "";
         }
         if (Key_id.length() > 0) {
-            Serial.println(Key_id);
+            Serial.println(Key_id);//trocar pra tcp
         }
         if (Key_id != Key_id_prev) {
-            delay(200);
+            delay(150);
         }
 
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
