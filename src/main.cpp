@@ -31,8 +31,9 @@ struct PlanetTag {
 
 // Base de Dados Estática
 PlanetTag planetDB[] = {
-    {"MERCURIO", "FF0FBA317F0100"},
-    {"VENUS",    "FF0FD5327F0100"},
+    {"MERCURIO", "FF0F91327F0100"},
+    {"VENUS",    "FF0F03327F0100"},
+    {"TERRA",    "FF0F02327F0100"}, 
     {"TERRA",    "FF0F48327F0100"}, 
     {"MARTE",    "FF0F01327F0100"},
     {"JUPITER",  "FF0F8E327F0100"},
@@ -42,6 +43,7 @@ PlanetTag planetDB[] = {
     {"SOL",      "FF0FBD317F0100"},
     {"LUA",      "FF0FBB317F0100"},
     {"MARTE",    "FF0F04327F0100"},
+    {"MARTE",    "FF0F4A327F0100"},
 };
 const int dbSize = sizeof(planetDB) / sizeof(planetDB[0]);
 
