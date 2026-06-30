@@ -40,8 +40,8 @@ PlanetTag planetDB[] = {
     {"URANO",    "FF0F8F327F0100"},
     {"NETUNO",   "FF0FD6327F0100"},
     {"SOL",      "FF0FBD317F0100"},
-    {"LUA",      "FF0FD8327F0100"},
-    {"MARTE",    "FF0F04327F0100"}
+    {"LUA",      "FF0FBB317F0100"},
+    {"MARTE",    "FF0F04327F0100"},
 };
 const int dbSize = sizeof(planetDB) / sizeof(planetDB[0]);
 
@@ -148,10 +148,9 @@ void triggerThreeErrorsAnimation() {
         Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
         //codigo pra abrir a porta
         servos[0].write(0);
-        delay(3500);
-        servos[0].write(0);
+        delay(5000);
+        servos[0].write(90);
         delay(600);
-        
         servoErrorTimer = millis();
         servoErrorActive = true;
         servoSuccessActive = false; 
@@ -179,7 +178,7 @@ void handleNFC() {
     mfrc522.PICC_HaltA(); 
     mfrc522.PCD_StopCrypto1();
 
-    if (currentState == STATE_READING_NFC || currentState == STATE_TUTORIAL) {
+    if ((currentState == STATE_READING_NFC) || (currentState == STATE_TUTORIAL)) {
         String detectedPlanet = "";
         bool found = false;
         
@@ -312,10 +311,10 @@ void processTCPCommand(String cmd) {
         Serial.println("[SISTEMA] Nova Fase ativa. Aguardando tag para: " + requestedPlanet);
     }
 
-    else if(lowerCmd.startsWith("game_over") || lowerCmd == "game_over") {
+    else if((lowerCmd.startsWith("game_over")) || (lowerCmd == "game_over")) {
         Serial.println("[SISTEMA] Game Over recebido. Resetando sistema...");
         currentState = STATE_IDLE;
-        triggerThreeErrorsAnimation(); // Animação de erro final
+        triggerThreeErrorsAnimation(); // Animação de erro final 
     }
 
     // --- Ativa o estado de leitura de botões ---
