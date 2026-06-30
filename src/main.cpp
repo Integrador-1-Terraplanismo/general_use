@@ -48,7 +48,7 @@ const int dbSize = sizeof(planetDB) / sizeof(planetDB[0]);
 // =========================================================
 //                MÁQUINA DE ESTADOS E GAMIFICATION
 // =========================================================
-enum SystemState { STATE_IDLE, STATE_READING_NFC };
+enum SystemState { STATE_IDLE, STATE_READING_NFC, STATE_READING_BUTTONS };
 SystemState currentState = STATE_IDLE;
 
 String requestedPlanet = "";
@@ -69,6 +69,7 @@ const unsigned long TRANSIT_TIME_MS = 400; // Tempo físico para o braço girar 
 // --- Protótipos ---
 void processTCPCommand(String cmd);
 void sendTCPMessage(String msg);
+void sendTCPMessageFast(String msg);
 void handleNFC();
 void handleSerialMonitor();
 void executeServoAction(int servoIndex, int angle);
@@ -102,7 +103,7 @@ void setup() {
     Serial.println("\n[SISTEMA] Sistema Pronto | Espera de 5s Removida.");
     
     xTaskCreate(tcpServerTask, "TCP_Task", 4096, NULL, 1, NULL);
-    xTaskCreate (button_module, "Button_Task", 2048, NULL, 1, NULL);
+    xTaskCreate(button_module, "Button_Task", 2048, NULL, 1, NULL);
 }
 
 // =========================================================
@@ -130,7 +131,7 @@ void loop() {
     if (servoSuccessActive && (millis() - servoSuccessTimer >= TRANSIT_TIME_MS)) {
         Serial.println("[SERVO-LOG] Curso concluido: Retornando servos 3 e 4 para 90°");
         servos[2].write(90);
-        servos[3].write(90);delay(600);
+        servos[3].write(90); delay(600);
         servoSuccessActive = false;
     }
 
@@ -150,23 +151,23 @@ void loop() {
 // =========================================================
 
 void triggerThreeErrorsAnimation() {
-    if(cont_fases >= 3){
-    Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
-    //codigo pra abrir a porta
-    servos[0].write(0);
-    delay(3500);
-    servos[0].write(0);
-    delay(600);
-    
-    servoErrorTimer = millis();
-    servoErrorActive = true;
-    servoSuccessActive = false; 
-    wrongAnswerCounter = 0;
+    if (cont_fases >= 3) {
+        Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
+        //codigo pra abrir a porta
+        servos[0].write(0);
+        delay(3500);
+        servos[0].write(0);
+        delay(600);
+        
+        servoErrorTimer = millis();
+        servoErrorActive = true;
+        servoSuccessActive = false; 
+        wrongAnswerCounter = 0;
     }
 }
 
 void executeServoAction(int servoIndex, int angle) {
-    servos[servoIndex].write(angle);delay(600);
+    servos[servoIndex].write(angle); delay(600);
 }
 
 // =========================================================
@@ -198,26 +199,27 @@ void handleNFC() {
         }
         
         // --- CASO 1: LEITURA CORRETA ---
-        if ((found && detectedPlanet == requestedPlanet)) {
+        if (found && detectedPlanet == requestedPlanet) {
             Serial.println("\n[NFC-LOG] Sucesso! Tag " + uidStr + " validada para o planeta " + detectedPlanet);
             sendTCPMessage("answer_correct");
             currentState = STATE_IDLE; // Desbloqueia instantaneamente para receber a próxima fase
             wrongAnswerCounter = 0;    
 
-            if(cont_fases >= 3){
-            Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para 0°");
-            servos[2].write(0);
-            servos[3].write(180);
-            delay(600);
-            servoSuccessTimer = millis();
-            servoSuccessActive = true;
-            servoErrorActive = false; }
+            if (cont_fases >= 3) {
+                Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para 0°");
+                servos[2].write(0);
+                servos[3].write(180);
+                delay(600);
+                servoSuccessTimer = millis();
+                servoSuccessActive = true;
+                servoErrorActive = false;
+            }
         } 
         // --- CASO 2: LEITURA INCORRETA ---
         else {
             Serial.println("\n[NFC-LOG] Erro! Tag detectada (" + uidStr + ") nao condiz.");
             sendTCPMessage("answer_incorrect");
-            if(cont_fases >= 3){
+            if (cont_fases >= 3) {
                 servos[2].write(180);
                 servos[3].write(0);
                 delay(500);
@@ -260,16 +262,32 @@ void tcpServerTask(void *pvParameters) {
             }
             Serial.println("[TCP-LOG] Cliente desconectado.");
             activeClient.stop();
+
+            // Cliente caiu/desconectou: encerra qualquer leitura de botões em andamento
+            if (currentState == STATE_READING_BUTTONS) {
+                currentState = STATE_IDLE;
+                Serial.println("[BOTOES-LOG] Estado de leitura de botões encerrado (cliente desconectou).");
+            }
         }
         vTaskDelay(15 / portTICK_PERIOD_MS);
     }
 }
 
+// Envio "pesado": usado pelo NFC. Mantém o delay propositalmente,
+// para dar tempo do pico eletrico dos servos se dissipar antes do próximo envio.
 void sendTCPMessage(String msg) {
     if (activeClient && activeClient.connected()) {
         activeClient.println(msg);
         Serial.println("[TCP-LOG] Mensagem Enviada -> " + msg);
         delay(2000);
+    }
+}
+
+// Envio "rápido": usado pelos botões. Sem delay, para garantir resposta em tempo real,
+// já que a leitura de botões não aciona servos.
+void sendTCPMessageFast(String msg) {
+    if (activeClient && activeClient.connected()) {
+        activeClient.println(msg);
     }
 }
 
@@ -303,7 +321,19 @@ void processTCPCommand(String cmd) {
         currentState = STATE_READING_NFC;
         readTimeoutStart = millis(); 
         Serial.println("[SISTEMA] Nova Fase ativa. Aguardando tag para: " + requestedPlanet);
-    } 
+    }
+    // --- Ativa o estado de leitura de botões ---
+    else if (lowerCmd.startsWith("botoes:on") || lowerCmd == "buttons_on") {
+        currentState = STATE_READING_BUTTONS;
+        Serial.println("[BOTOES-LOG] Estado de leitura de botões ATIVADO.");
+    }
+    // --- Encerra o estado de leitura de botões ---
+    else if (lowerCmd.startsWith("botoes:off") || lowerCmd == "buttons_off") {
+        if (currentState == STATE_READING_BUTTONS) {
+            currentState = STATE_IDLE;
+        }
+        Serial.println("[BOTOES-LOG] Estado de leitura de botões DESATIVADO.");
+    }
 }
 
 // =========================================================
@@ -326,7 +356,7 @@ void handleSerialMonitor() {
                 Serial.println("[TESTE] Concluido.");
             }
         }
-        if(input.startsWith("TESTE_PARES")) {
+        if (input.startsWith("TESTE_PARES")) {
             servos[2].write(0);
             servos[3].write(180);
             delay(600);
@@ -340,7 +370,7 @@ void handleSerialMonitor() {
             servos[0].write(90);
             delay(600);
         }
-        if(input == "RESET") {
+        if (input == "RESET") {
             Serial.println("\n[RESET] Resetando sistema e servos para 90°...");
             for (int i = 0; i < 4; i++) servos[i].write(90);
             currentState = STATE_IDLE;
@@ -349,7 +379,7 @@ void handleSerialMonitor() {
             servoErrorActive = false;
             Serial.println("[RESET] Concluido.");
         }
-        if(input == "TESTE_NFC"){
+        if (input == "TESTE_NFC") {
             if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) return;
 
             String uidStr = "";
@@ -369,31 +399,49 @@ void handleSerialMonitor() {
 // =========================================================
 //            Task Leitura do Módulo de Botões
 // =========================================================
+// Só envia leituras quando currentState == STATE_READING_BUTTONS, ativado
+// e desativado pelo cliente via TCP ("botoes:on" / "botoes:off").
+// Debounce feito por millis() (não bloqueante) para garantir o menor
+// atraso possível na comunicação em tempo real.
 
 void button_module(void *pvParameters) {
     pinMode(buttons_PIN, INPUT_PULLUP);
     int key_read;
     String Key_id, Key_id_prev = "";
+    unsigned long lastChangeTime = 0;
+    const unsigned long DEBOUNCE_MS = 150;
+
     while (true) {
-        key_read = analogRead(buttons_PIN);
-        if (key_read == 0) {
-            Key_id = "LEFT";
-        } else if (key_read > 10 && key_read < 500) {
-            Key_id = "UP";
-        } else if (key_read > 600 && key_read < 1100) {
-            Key_id = "DOWN";
-        } else if (key_read > 1600 && key_read < 1900) {
-            Key_id = "RIGHT";
-        } else if (key_read > 2800 && key_read < 3100) {
-            Key_id = "OK";
+        // Só processa leituras se o cliente tiver ativado o estado
+        if (currentState == STATE_READING_BUTTONS) {
+            key_read = analogRead(buttons_PIN);
+            if (key_read == 0) {
+                Key_id = "LEFT";
+            } else if (key_read > 10 && key_read < 500) {
+                Key_id = "UP";
+            } else if (key_read > 600 && key_read < 1100) {
+                Key_id = "DOWN";
+            } else if (key_read > 1600 && key_read < 1900) {
+                Key_id = "RIGHT";
+            } else if (key_read > 2800 && key_read < 3100) {
+                Key_id = "OK";
+            } else {
+                Key_id = "";
+            }
+
+            unsigned long now = millis();
+            // Só dispara quando a tecla muda E o debounce (não bloqueante) já passou
+            if (Key_id.length() > 0 && Key_id != Key_id_prev && (now - lastChangeTime >= DEBOUNCE_MS)) {
+                Serial.println(Key_id);
+                sendTCPMessageFast(Key_id); // envio imediato, sem delay
+                lastChangeTime = now;
+            }
+
+            if (Key_id != Key_id_prev) {
+                Key_id_prev = Key_id;
+            }
         } else {
-            Key_id = "";
-        }
-        if (Key_id.length() > 0) {
-            Serial.println(Key_id);//trocar pra tcp
-        }
-        if (Key_id != Key_id_prev) {
-            delay(150);
+            Key_id_prev = ""; // reseta o estado anterior enquanto o modo de botões está inativo
         }
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
