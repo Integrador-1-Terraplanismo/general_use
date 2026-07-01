@@ -18,8 +18,12 @@ WiFiClient activeClient;
 #define buttons_PIN 32
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);
-
-const int servoPins[4] = {13, 12, 14, 27};
+                     //  {1  , 2, 3,   4}
+const int servoPins[4] = {13, 14, 27, 26};
+//servo[0] = servo porta
+//servo[1] = servo esquerda 
+//servo[2] = servo esquerda 
+//servo[3] = servo direita
 Servo servos[4];
 
 //int cont_fases = 0;
@@ -126,7 +130,8 @@ void loop() {
     if (servoSuccessActive && (millis() - servoSuccessTimer >= TRANSIT_TIME_MS)) {
         Serial.println("[SERVO-LOG] Curso concluido: Retornando servos 3 e 4 para 90°");
         servos[2].write(90);
-        servos[3].write(90); delay(600);
+        servos[3].write(90); 
+        delay(600);
         servoSuccessActive = false;
     }
 
@@ -146,6 +151,7 @@ void loop() {
 // =========================================================
 
 void triggerThreeErrorsAnimation() {
+    Serial.println("\n[SERVO-LOG] 3 erros consecutivos! Movendo servos 1, 2, 3 e 4 para 180°");
     if (!STATE_TUTORIAL) {
         Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
         //codigo pra abrir a porta
@@ -201,8 +207,8 @@ void handleNFC() {
 
             if (!STATE_TUTORIAL) {
                 Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para 0°");
-                servos[2].write(0);
-                servos[3].write(180);
+                servos[2].write(50);
+                servos[3].write(130);
                 delay(600);
                 servoSuccessTimer = millis();
                 servoSuccessActive = true;
@@ -214,8 +220,8 @@ void handleNFC() {
             Serial.println("\n[NFC-LOG] Erro! Tag detectada (" + uidStr + ") nao condiz.");
             sendTCPMessage("answer_incorrect");
             if (!STATE_TUTORIAL) {
-                servos[2].write(180);
-                servos[3].write(0);
+                servos[2].write(150);
+                servos[3].write(30);
                 delay(500);
                 servos[2].write(90);
                 servos[3].write(90);
@@ -404,22 +410,18 @@ void handleSerialMonitor() {
 // =========================================================
 //            Task Leitura do Módulo de Botões
 // =========================================================
-// Só envia leituras quando currentState == STATE_READING_BUTTONS, ativado
-// e desativado pelo cliente via TCP ("botoes:on" / "botoes:off").
-// Debounce feito por millis() (não bloqueante) para garantir o menor
-// atraso possível na comunicação em tempo real.
-
 void button_module(void *pvParameters) {
     pinMode(buttons_PIN, INPUT_PULLUP);
     int key_read;
     String Key_id, Key_id_prev = "";
     unsigned long lastChangeTime = 0;
-    const unsigned long DEBOUNCE_MS = 150;
+    const unsigned long DEBOUNCE_MS = 150; 
 
     while (true) {
-        // Só processa leituras se o cliente tiver ativado o estado
         if (currentState == STATE_READING_BUTTONS) {
             key_read = analogRead(buttons_PIN);
+            
+            // Mantive seus valores de calibração originais
             if (key_read == 0) {
                 Key_id = "LEFT";
             } else if (key_read > 10 && key_read < 500) {
@@ -431,22 +433,35 @@ void button_module(void *pvParameters) {
             } else if (key_read > 2800 && key_read < 3100) {
                 Key_id = "OK";
             } else {
-                Key_id = "";
+                Key_id = ""; // Nenhum botão pressionado
             }
 
             unsigned long now = millis();
-            // Só dispara quando a tecla muda E o debounce (não bloqueante) já passou
-            if (Key_id.length() > 0 && Key_id != Key_id_prev && (now - lastChangeTime >= DEBOUNCE_MS)) {
-                Serial.println(Key_id);
-                sendTCPMessageFast(Key_id); // envio imediato, sem delay
-                lastChangeTime = now;
-            }
 
-            if (Key_id != Key_id_prev) {
+            // Verifica se o botão mudou de estado E se o tempo de debounce já passou
+            if (Key_id != Key_id_prev && (now - lastChangeTime >= DEBOUNCE_MS)) {
+                
+                // 1. Se um botão foi PRESSIONADO
+                if (Key_id.length() > 0 ) {
+                    sendTCPMessageFast(Key_id);
+                }
+                // 2. Se o botão foi SOLTO (Key_id atual é vazio, mas o anterior não era)
+                 if (Key_id != Key_id_prev) {
+                    delay(DEBOUNCE_MS);
+                }
+
+                // Atualiza o estado anterior e reseta o temporizador
                 Key_id_prev = Key_id;
+                //lastChangeTime = now;
             }
-        } else {
-            Key_id_prev = ""; // reseta o estado anterior enquanto o modo de botões está inativo
+        } 
+        else {
+            // Se o minigame acabar enquanto o jogador estiver segurando um botão,
+            // garante que enviamos um STOP e limpamos o estado para não bugar a nave depois.
+            if (Key_id_prev.length() > 0) {
+                sendTCPMessageFast("STOP");
+                Key_id_prev = "";
+            }
         }
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
