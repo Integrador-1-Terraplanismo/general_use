@@ -155,7 +155,7 @@ void triggerThreeErrorsAnimation() {
     if (currentState != STATE_TUTORIAL) {
         Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
         //codigo pra abrir a porta
-        servos[0].write(0);
+        servos[0].write(180);
         delay(5000);
         servos[0].write(90);
         delay(600);
@@ -202,17 +202,17 @@ void handleNFC() {
         if (found && detectedPlanet == requestedPlanet) {
             Serial.println("\n[NFC-LOG] Sucesso! Tag " + uidStr + " validada para o planeta " + detectedPlanet);
             sendTCPMessage("answer_correct");
-            currentState = STATE_IDLE; // Desbloqueia instantaneamente para receber a próxima fase
-              
-
+            
+            
             if (currentState != STATE_TUTORIAL) {
                 Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para abrir a tampa");
-                servos[2].write(50);
-                servos[3].write(130);
-                delay(600);
+                servos[2].write(0);
+                servos[3].write(180);
+                delay(2000);
                 servoSuccessTimer = millis();
                 servoSuccessActive = true;
                 servoErrorActive = false;
+                //currentState = STATE_IDLE; // Desbloqueia instantaneamente para receber a próxima fase
             }
         } 
         // --- CASO 2: LEITURA INCORRETA ---
@@ -223,7 +223,7 @@ void handleNFC() {
                 Serial.println("[SERVO-LOG] Resposta Incorreta: Pulsando servos 3 e 4 para tirar o planeta");
                 servos[2].write(150);
                 servos[3].write(30);
-                delay(500);
+                delay(600);
                 servos[2].write(90);
                 servos[3].write(90);
                 delay(100);
@@ -323,6 +323,7 @@ void processTCPCommand(String cmd) {
     else if((lowerCmd.startsWith("game_over")) || (lowerCmd == "game_over")) {
         Serial.println("[SISTEMA] Game Over recebido. Resetando sistema...");
         currentState = STATE_IDLE;
+        delay(3500);
         triggerThreeErrorsAnimation(); // Animação de erro final 
     }
 
@@ -343,6 +344,7 @@ void processTCPCommand(String cmd) {
         Serial.println("[TUTORIAL-LOG] Modo Tutorial ATIVADO.");
     }
     else if (lowerCmd.startsWith("tutorial:off") || lowerCmd == "tutorial_off") {
+        triggerThreeErrorsAnimation(); 
         currentState = STATE_IDLE;
         Serial.println("[TUTORIAL-LOG] Modo Tutorial DESATIVADO.");
     }
