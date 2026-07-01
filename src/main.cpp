@@ -19,7 +19,7 @@ WiFiClient activeClient;
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);
                      //  {1  , 2, 3,   4}
-const int servoPins[4] = {13, 14, 27, 26};
+const int servoPins[4] = {13, 14, 26, 27};
 //servo[0] = servo porta
 //servo[1] = servo esquerda 
 //servo[2] = servo esquerda 
@@ -152,7 +152,7 @@ void loop() {
 
 void triggerThreeErrorsAnimation() {
     Serial.println("\n[SERVO-LOG] 3 erros consecutivos! Movendo servos 1, 2, 3 e 4 para 180°");
-    if (!STATE_TUTORIAL) {
+    if (currentState != STATE_TUTORIAL) {
         Serial.println("\n[SERVO-LOG] ALERTA: 3 erros! Movendo servos 1, 2, 3 e 4 para 180°");
         //codigo pra abrir a porta
         servos[0].write(0);
@@ -205,8 +205,8 @@ void handleNFC() {
             currentState = STATE_IDLE; // Desbloqueia instantaneamente para receber a próxima fase
               
 
-            if (!STATE_TUTORIAL) {
-                Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para 0°");
+            if (currentState != STATE_TUTORIAL) {
+                Serial.println("[SERVO-LOG] Resposta Correta: Pulsando servos 3 e 4 para abrir a tampa");
                 servos[2].write(50);
                 servos[3].write(130);
                 delay(600);
@@ -219,7 +219,8 @@ void handleNFC() {
         else {
             Serial.println("\n[NFC-LOG] Erro! Tag detectada (" + uidStr + ") nao condiz.");
             sendTCPMessage("answer_incorrect");
-            if (!STATE_TUTORIAL) {
+            if (currentState != STATE_TUTORIAL) {
+                Serial.println("[SERVO-LOG] Resposta Incorreta: Pulsando servos 3 e 4 para tirar o planeta");
                 servos[2].write(150);
                 servos[3].write(30);
                 delay(500);
@@ -368,14 +369,14 @@ void handleSerialMonitor() {
             }
         }
         if (input.startsWith("TESTE_PARES")) {
-            servos[2].write(0);
-            servos[3].write(180);
+            servos[2].write(60);
+            servos[3].write(120);
             delay(600);
             servos[2].write(90);
             servos[3].write(90);
             delay(1000);
-            servos[1].write(180);
-            servos[0].write(0);
+            servos[1].write(120);
+            servos[0].write(60);
             delay(600);
             servos[1].write(90);
             servos[0].write(90);
