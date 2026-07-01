@@ -421,44 +421,43 @@ void button_module(void *pvParameters) {
     const unsigned long DEBOUNCE_MS = 150; 
 
     while (true) {
+        key_read = analogRead(buttons_PIN);
+
+        if (key_read == 0) {
+            Key_id = "LEFT";
+        } else if (key_read > 10 && key_read < 500) {
+            Key_id = "UP";
+        } else if (key_read > 600 && key_read < 1100) {
+            Key_id = "DOWN";
+        } else if (key_read > 1600 && key_read < 1900) {
+            Key_id = "RIGHT";
+        } else if (key_read > 2800 && key_read < 3100) {
+            Key_id = "OK";
+        } else {
+            Key_id = ""; // Nenhum botão pressionado
+        }
+
+        unsigned long now = millis();
+        //Serial.printf("[BOTOES-DEBUG] raw=%d -> Key_id='%s' | state=%d\n", key_read, Key_id.c_str(), currentState);
+
         if (currentState == STATE_READING_BUTTONS) {
-            key_read = analogRead(buttons_PIN);
-            
-            // Mantive seus valores de calibração originais
-            if (key_read == 0) {
-                Key_id = "LEFT";
-            } else if (key_read > 10 && key_read < 500) {
-                Key_id = "UP";
-            } else if (key_read > 600 && key_read < 1100) {
-                Key_id = "DOWN";
-            } else if (key_read > 1600 && key_read < 1900) {
-                Key_id = "RIGHT";
-            } else if (key_read > 2800 && key_read < 3100) {
-                Key_id = "OK";
-            } else {
-                Key_id = ""; // Nenhum botão pressionado
-            }
-
-            unsigned long now = millis();
-
             // Verifica se o botão mudou de estado E se o tempo de debounce já passou
             if (Key_id != Key_id_prev && (now - lastChangeTime >= DEBOUNCE_MS)) {
-                
                 // 1. Se um botão foi PRESSIONADO
-                if (Key_id.length() > 0 ) {
+                if (Key_id.length() > 0) {
+                    Serial.println(Key_id);
                     sendTCPMessageFast(Key_id);
                 }
                 // 2. Se o botão foi SOLTO (Key_id atual é vazio, mas o anterior não era)
-                 if (Key_id != Key_id_prev) {
+                if (Key_id != Key_id_prev) {
                     delay(DEBOUNCE_MS);
                 }
 
                 // Atualiza o estado anterior e reseta o temporizador
                 Key_id_prev = Key_id;
-                //lastChangeTime = now;
+                lastChangeTime = now;
             }
-        } 
-        else {
+        } else {
             // Se o minigame acabar enquanto o jogador estiver segurando um botão,
             // garante que enviamos um STOP e limpamos o estado para não bugar a nave depois.
             if (Key_id_prev.length() > 0) {
